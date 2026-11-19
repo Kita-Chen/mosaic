@@ -13,7 +13,7 @@ const server = Server({
   origins: [
     "http://localhost:8080",
     "http://localhost:3000",
-    "https://mosaic.maciejmatu.com/",
+    /\.onrender\.com$/,
   ],
 });
 
