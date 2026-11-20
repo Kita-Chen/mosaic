@@ -25,6 +25,12 @@ export const TilesBoard = () => {
           <div
             key={tileGroupIndex}
             className={classNames("TilesContainer", "TilesBoard__tile")}
+            style={{
+              aspectRatio: "1 / 1",
+              height: "auto",
+              alignSelf: "center",
+              flexShrink: 0,
+            }}
           >
             {times(4, (index) => {
               const tile = tileGroup[index];
