@@ -51,21 +51,21 @@ export const BotManager: React.FC<BotManagerProps> = ({ roomID }) => {
 
         if (isScheduling) return;
 
-        const numMoves = state.ctx?.numMoves ?? 0;
+        const hasPicked = !!(state.G as GameState)?.hasPickedTiles;
         isScheduling = true;
 
-        if (numMoves === 0) {
+        if (!hasPicked) {
           // 階段 1：思考並執行拿磚
           timerId = setTimeout(() => {
             timerId = null;
-            isScheduling = false; // 必須在呼叫 moves 前解除鎖定
+            isScheduling = false;
 
             const latest = client.getState() as any;
             if (
               !latest ||
               latest.ctx?.gameover ||
               latest.ctx?.currentPlayer !== botIdStr ||
-              (latest.ctx?.numMoves ?? 0) > 0
+              (latest.G as GameState)?.hasPickedTiles
             ) {
               return;
             }
@@ -91,7 +91,7 @@ export const BotManager: React.FC<BotManagerProps> = ({ roomID }) => {
               !latest ||
               latest.ctx?.gameover ||
               latest.ctx?.currentPlayer !== botIdStr ||
-              (latest.ctx?.numMoves ?? 0) === 0
+              !(latest.G as GameState)?.hasPickedTiles
             ) {
               return;
             }
@@ -106,7 +106,6 @@ export const BotManager: React.FC<BotManagerProps> = ({ roomID }) => {
         tryAct(state);
       });
 
-      // 保底輪詢：防止剛連線或事件競爭時漏掉觸發
       const pollId = setInterval(() => {
         const latest = client.getState() as any;
         if (latest) tryAct(latest);
