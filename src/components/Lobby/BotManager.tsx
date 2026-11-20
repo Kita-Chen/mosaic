@@ -1,144 +1,90 @@
-import React, { useEffect } from "react";
-import { Client } from "boardgame.io/client";
+import React, { useEffect, useMemo } from "react";
+import { Client, BoardProps } from "boardgame.io/react";
 import { SocketIO } from "boardgame.io/multiplayer";
 import { SERVER_URL } from "../../config/client";
 import { MosaicGame, GameState } from "../../game";
 import { chooseBestMove } from "../../game/bot";
 import { getRoomBots } from "../../store/store";
 
+const BotBoard: React.FC<BoardProps<GameState>> = ({
+  G,
+  ctx,
+  moves,
+  playerID,
+}) => {
+  useEffect(() => {
+    if (!playerID || ctx?.gameover) return;
+
+    const botIdStr = String(playerID);
+    const currentPlayerStr = String(ctx?.currentPlayer);
+
+    console.log("[BotBoard] sync:", {
+      bot: botIdStr,
+      currentPlayer: currentPlayerStr,
+      hasPickedTiles: G?.hasPickedTiles,
+    });
+
+    if (currentPlayerStr !== botIdStr) return;
+
+    if (!G?.hasPickedTiles) {
+      // 階段 1：思考並執行拿磚
+      const timer = setTimeout(() => {
+        const move = chooseBestMove(G, botIdStr);
+        console.log(`[BotBoard] Bot ${botIdStr} pickTiles:`, move);
+        if (move) {
+          moves.pickTiles(move.tiles, move.tileGroupId, move.targetSlotId);
+        }
+      }, 800);
+
+      return () => clearTimeout(timer);
+    } else {
+      // 階段 2：短暫停頓後自動結束回合
+      const timer = setTimeout(() => {
+        console.log(`[BotBoard] Bot ${botIdStr} endTurn`);
+        moves.endTurn();
+      }, 500);
+
+      return () => clearTimeout(timer);
+    }
+  }, [G, ctx?.currentPlayer, ctx?.gameover, playerID, moves]);
+
+  return null;
+};
+
+// 使用與主遊戲畫面完全相同的 boardgame.io/react Client 封裝
+const BotClient = Client({
+  game: MosaicGame,
+  board: BotBoard,
+  multiplayer: SocketIO({
+    server: SERVER_URL,
+    socketOpts: { forceNew: true },
+  }),
+});
+
 interface BotManagerProps {
   roomID?: string;
 }
 
 export const BotManager: React.FC<BotManagerProps> = ({ roomID }) => {
+  const bots = useMemo(() => (roomID ? getRoomBots(roomID) : []), [roomID]);
+
   useEffect(() => {
-    if (!roomID) return;
+    console.log("[BotManager] mounted with bots:", { roomID, bots });
+  }, [roomID, bots]);
 
-    const bots = getRoomBots(roomID);
-    console.log("[BotManager] init:", { roomID, bots });
-    if (bots.length === 0) return;
+  if (!roomID || bots.length === 0) return null;
 
-    const cleanups: (() => void)[] = [];
-
-    bots.forEach((bot) => {
-      const botIdStr = String(bot.playerID);
-
-      const client = Client({
-        game: MosaicGame,
-        multiplayer: SocketIO({
-          server: SERVER_URL,
-          socketOpts: { forceNew: true }, // 強制開啟獨立連線，避免與主畫面共用同一個 Socket
-        }),
-        matchID: roomID,
-        gameID: roomID,
-        playerID: botIdStr,
-        credentials: bot.credential,
-        debug: false,
-      } as any);
-
-      let timerId: ReturnType<typeof setTimeout> | null = null;
-      let isScheduling = false;
-      let loggedWaiting = false;
-
-      const tryAct = (state: any) => {
-        if (!state || state.ctx?.gameover) return;
-        if (state.isConnected === false) return;
-
-        if (state.ctx?.currentPlayer !== botIdStr) {
-          isScheduling = false;
-          if (timerId) {
-            clearTimeout(timerId);
-            timerId = null;
-          }
-          return;
-        }
-
-        if (isScheduling) return;
-
-        const hasPicked = !!(state.G as GameState)?.hasPickedTiles;
-        isScheduling = true;
-
-        if (!hasPicked) {
-          // 階段 1：思考並執行拿磚
-          timerId = setTimeout(() => {
-            timerId = null;
-            isScheduling = false;
-
-            const latest = client.getState() as any;
-            if (
-              !latest ||
-              latest.ctx?.gameover ||
-              latest.ctx?.currentPlayer !== botIdStr ||
-              (latest.G as GameState)?.hasPickedTiles
-            ) {
-              return;
-            }
-
-            const move = chooseBestMove(latest.G as GameState, botIdStr);
-            console.log(`[BotManager] Bot ${botIdStr} pickTiles:`, move);
-            if (move) {
-              client.moves.pickTiles(
-                move.tiles,
-                move.tileGroupId,
-                move.targetSlotId
-              );
-            }
-          }, 800);
-        } else {
-          // 階段 2：短暫停頓後自動結束回合
-          timerId = setTimeout(() => {
-            timerId = null;
-            isScheduling = false;
-
-            const latest = client.getState() as any;
-            if (
-              !latest ||
-              latest.ctx?.gameover ||
-              latest.ctx?.currentPlayer !== botIdStr ||
-              !(latest.G as GameState)?.hasPickedTiles
-            ) {
-              return;
-            }
-
-            console.log(`[BotManager] Bot ${botIdStr} endTurn`);
-            client.moves.endTurn();
-          }, 500);
-        }
-      };
-
-      const unsubscribe = client.subscribe((state: any) => {
-        tryAct(state);
-      });
-
-      const pollId = setInterval(() => {
-        const latest = client.getState() as any;
-        if (!latest || latest.isConnected === false) {
-          if (!loggedWaiting) {
-            console.log(`[BotManager] Bot ${botIdStr} waiting for connection...`, {
-              hasState: !!latest,
-              isConnected: latest?.isConnected,
-            });
-            loggedWaiting = true;
-          }
-          return;
-        }
-        tryAct(latest);
-      }, 1500);
-
-      client.start();
-
-      cleanups.push(() => {
-        if (timerId) clearTimeout(timerId);
-        clearInterval(pollId);
-        unsubscribe();
-        client.stop();
-      });
-    });
-
-    return () => {
-      cleanups.forEach((fn) => fn());
-    };
-  }, [roomID]);
-
-  return null;
+  return (
+    <div style={{ display: "none" }}>
+      {bots.map((bot) => (
+        <BotClient
+          key={`${roomID}-${bot.playerID}`}
+          gameID={roomID}
+          playerID={String(bot.playerID)}
+          credentials={bot.credential}
+          debug={false}
+        />
+      ))}
+    </div>
+  );
 };
