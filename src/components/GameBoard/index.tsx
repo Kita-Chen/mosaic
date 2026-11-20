@@ -11,6 +11,7 @@ import { Sidebar } from "./Sidebar";
 import classNames from "classnames";
 import { useParams } from "react-router-dom";
 import { useStoreState } from "../../store";
+import { Button } from "components/Button";
 
 export interface SelectedTiles {
   tiles: GameTile[];
@@ -51,7 +52,6 @@ export const GameBoard: React.FC<BoardProps<GameState>> = ({
       .pinned
   );
 
-  // 啟用投票 stage 後所有玩家皆為 active，因此需明確比對 currentPlayer
   const isMyTurn =
     !!isActive &&
     playerID !== undefined &&
@@ -135,6 +135,25 @@ export const GameBoard: React.FC<BoardProps<GameState>> = ({
     });
   }, [ctx?.playOrder, matchData, roomMetadata, playerID, nickname]);
 
+  // 右上角「終結遊戲」按鈕的投票狀態
+  const humanIds = playersInfo
+    .filter((p) => !p.name?.startsWith("🤖"))
+    .map((p) => String(p.id));
+  const endGameVotes = State?.endGameVotes || [];
+  const votedCount = humanIds.filter((id) => endGameVotes.includes(id)).length;
+  const myId = playerID !== undefined ? String(playerID) : "";
+  const isHumanPlayer = humanIds.includes(myId);
+  const hasVoted = endGameVotes.includes(myId);
+
+  const voteLabel =
+    humanIds.length <= 1
+      ? "終結遊戲"
+      : hasVoted
+      ? `取消終結 (${votedCount}/${humanIds.length})`
+      : votedCount > 0
+      ? `同意終結 (${votedCount}/${humanIds.length})`
+      : "終結遊戲";
+
   return (
     <BoardContext.Provider
       value={{
@@ -162,10 +181,32 @@ export const GameBoard: React.FC<BoardProps<GameState>> = ({
     >
       <div
         className={classNames(
-          "h-screen flex items-center justify-center flex-col",
+          "h-screen flex items-center justify-center flex-col relative",
           isSidebarPinned && "pl-[400px]"
         )}
       >
+        {isHumanPlayer && !ctx?.gameover && (
+          <div
+            style={{
+              position: "fixed",
+              top: 24,
+              right: 32,
+              zIndex: 20,
+            }}
+          >
+            <Button
+              theme={hasVoted ? "yellow" : "pink"}
+              size="small"
+              disabled={!isMyTurn}
+              onClick={() => {
+                moves.voteEndGame(humanIds);
+              }}
+            >
+              {voteLabel}
+            </Button>
+          </div>
+        )}
+
         <Sidebar />
         {!!ctx.gameover && <GameOver />}
         <TilesBoard />
