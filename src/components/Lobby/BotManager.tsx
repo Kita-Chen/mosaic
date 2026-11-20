@@ -79,7 +79,7 @@ export const BotManager: React.FC<BotManagerProps> = ({ roomID }) => {
       {bots.map((bot) => (
         <BotClient
           key={`${roomID}-${bot.playerID}`}
-          gameID={roomID}
+          matchID={roomID}
           playerID={String(bot.playerID)}
           credentials={bot.credential}
           debug={false}
