@@ -15,6 +15,7 @@ export const BotManager: React.FC<BotManagerProps> = ({ roomID }) => {
     if (!roomID) return;
 
     const bots = getRoomBots(roomID);
+    console.log("[BotManager] init:", { roomID, bots });
     if (bots.length === 0) return;
 
     const cleanups: (() => void)[] = [];
@@ -22,7 +23,6 @@ export const BotManager: React.FC<BotManagerProps> = ({ roomID }) => {
     bots.forEach((bot) => {
       const botIdStr = String(bot.playerID);
 
-      // 建立不渲染畫面的背景 Socket 連線
       const client = Client({
         game: MosaicGame,
         multiplayer: SocketIO({ server: SERVER_URL }),
@@ -30,25 +30,36 @@ export const BotManager: React.FC<BotManagerProps> = ({ roomID }) => {
         gameID: roomID,
         playerID: botIdStr,
         credentials: bot.credential,
+        debug: false,
       } as any);
 
       let timerId: ReturnType<typeof setTimeout> | null = null;
       let isScheduling = false;
 
-      const unsubscribe = client.subscribe((state: any) => {
+      const tryAct = (state: any) => {
         if (!state || state.ctx?.gameover) return;
+        if (state.isConnected === false) return;
+
         if (state.ctx?.currentPlayer !== botIdStr) {
           isScheduling = false;
+          if (timerId) {
+            clearTimeout(timerId);
+            timerId = null;
+          }
           return;
         }
+
         if (isScheduling) return;
 
         const numMoves = state.ctx?.numMoves ?? 0;
+        isScheduling = true;
 
         if (numMoves === 0) {
           // 階段 1：思考並執行拿磚
-          isScheduling = true;
           timerId = setTimeout(() => {
+            timerId = null;
+            isScheduling = false; // 必須在呼叫 moves 前解除鎖定
+
             const latest = client.getState() as any;
             if (
               !latest ||
@@ -56,11 +67,11 @@ export const BotManager: React.FC<BotManagerProps> = ({ roomID }) => {
               latest.ctx?.currentPlayer !== botIdStr ||
               (latest.ctx?.numMoves ?? 0) > 0
             ) {
-              isScheduling = false;
               return;
             }
 
             const move = chooseBestMove(latest.G as GameState, botIdStr);
+            console.log(`[BotManager] Bot ${botIdStr} pickTiles:`, move);
             if (move) {
               client.moves.pickTiles(
                 move.tiles,
@@ -68,12 +79,13 @@ export const BotManager: React.FC<BotManagerProps> = ({ roomID }) => {
                 move.targetSlotId
               );
             }
-            isScheduling = false;
           }, 800);
         } else {
-          // 階段 2：已拿磚，短暫停頓後自動結束回合
-          isScheduling = true;
+          // 階段 2：短暫停頓後自動結束回合
           timerId = setTimeout(() => {
+            timerId = null;
+            isScheduling = false;
+
             const latest = client.getState() as any;
             if (
               !latest ||
@@ -81,20 +93,30 @@ export const BotManager: React.FC<BotManagerProps> = ({ roomID }) => {
               latest.ctx?.currentPlayer !== botIdStr ||
               (latest.ctx?.numMoves ?? 0) === 0
             ) {
-              isScheduling = false;
               return;
             }
 
+            console.log(`[BotManager] Bot ${botIdStr} endTurn`);
             client.moves.endTurn();
-            isScheduling = false;
           }, 500);
         }
+      };
+
+      const unsubscribe = client.subscribe((state: any) => {
+        tryAct(state);
       });
+
+      // 保底輪詢：防止剛連線或事件競爭時漏掉觸發
+      const pollId = setInterval(() => {
+        const latest = client.getState() as any;
+        if (latest) tryAct(latest);
+      }, 1500);
 
       client.start();
 
       cleanups.push(() => {
         if (timerId) clearTimeout(timerId);
+        clearInterval(pollId);
         unsubscribe();
         client.stop();
       });
