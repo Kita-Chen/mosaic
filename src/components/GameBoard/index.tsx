@@ -51,12 +51,18 @@ export const GameBoard: React.FC<BoardProps<GameState>> = ({
       .pinned
   );
 
+  // 啟用投票 stage 後所有玩家皆為 active，因此需明確比對 currentPlayer
+  const isMyTurn =
+    !!isActive &&
+    playerID !== undefined &&
+    String(ctx.currentPlayer) === String(playerID);
+
   const pickTiles = (
     tileIds: GameTile[],
     tileGroupId: number | "middle",
     targetSlotId: number | "minus-points"
   ) => {
-    if (!isActive) return;
+    if (!isMyTurn) return;
 
     moves.pickTiles(tileIds, tileGroupId, targetSlotId);
     setSelectedTiles(undefined);
@@ -74,8 +80,7 @@ export const GameBoard: React.FC<BoardProps<GameState>> = ({
 
   const [alertPlayed, setAlertPlayed] = useState(false);
   useEffect(() => {
-    if (isActive) {
-      // Playing alert if not already played
+    if (isMyTurn) {
       if (!alertPlayed && alert) {
         const playPromise = alert.play();
         if (playPromise && typeof playPromise.then === "function") {
@@ -89,15 +94,14 @@ export const GameBoard: React.FC<BoardProps<GameState>> = ({
         }
       }
     } else {
-      // Reset alertPlayed to false
       if (alertPlayed) {
         setAlertPlayed(false);
       }
     }
-  }, [alert, alertPlayed, isActive]);
+  }, [alert, alertPlayed, isMyTurn]);
 
   useEffect(() => {
-    if (!isActive) return;
+    if (!isMyTurn) return;
 
     const originalTitle = document.title;
 
@@ -112,7 +116,7 @@ export const GameBoard: React.FC<BoardProps<GameState>> = ({
       clearInterval(interval);
       document.title = originalTitle;
     };
-  }, [t, isActive]);
+  }, [t, isMyTurn]);
 
   const playersInfo = React.useMemo(() => {
     const ids: string[] = (ctx?.playOrder || []).map((p: any) => String(p));
@@ -137,7 +141,7 @@ export const GameBoard: React.FC<BoardProps<GameState>> = ({
         playerID: playerID || watchId,
         moves,
         State,
-        isActive,
+        isActive: isMyTurn,
         ctx,
         undo,
         chatMessages,
