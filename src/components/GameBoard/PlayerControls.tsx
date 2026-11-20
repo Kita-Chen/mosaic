@@ -80,6 +80,7 @@ export const PlayerControls = () => {
           theme={hasVoted ? "yellow" : "pink"}
           size="small"
           className="PlayerControls__button"
+          disabled={!isActive}
           onClick={() => {
             moves.voteEndGame(humanIds);
           }}
