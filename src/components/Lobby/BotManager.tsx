@@ -25,7 +25,10 @@ export const BotManager: React.FC<BotManagerProps> = ({ roomID }) => {
 
       const client = Client({
         game: MosaicGame,
-        multiplayer: SocketIO({ server: SERVER_URL }),
+        multiplayer: SocketIO({
+          server: SERVER_URL,
+          socketOpts: { forceNew: true }, // 強制開啟獨立連線，避免與主畫面共用同一個 Socket
+        }),
         matchID: roomID,
         gameID: roomID,
         playerID: botIdStr,
@@ -35,6 +38,7 @@ export const BotManager: React.FC<BotManagerProps> = ({ roomID }) => {
 
       let timerId: ReturnType<typeof setTimeout> | null = null;
       let isScheduling = false;
+      let loggedWaiting = false;
 
       const tryAct = (state: any) => {
         if (!state || state.ctx?.gameover) return;
@@ -108,7 +112,17 @@ export const BotManager: React.FC<BotManagerProps> = ({ roomID }) => {
 
       const pollId = setInterval(() => {
         const latest = client.getState() as any;
-        if (latest) tryAct(latest);
+        if (!latest || latest.isConnected === false) {
+          if (!loggedWaiting) {
+            console.log(`[BotManager] Bot ${botIdStr} waiting for connection...`, {
+              hasState: !!latest,
+              isConnected: latest?.isConnected,
+            });
+            loggedWaiting = true;
+          }
+          return;
+        }
+        tryAct(latest);
       }, 1500);
 
       client.start();
