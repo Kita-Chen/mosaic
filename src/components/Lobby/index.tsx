@@ -233,14 +233,14 @@ export const GameLobbyPlay = () => {
   const activeRoomPlayer = useStoreState((s) => s.activeRoomPlayer);
 
   if (!activeRoomPlayer) {
-    return <GameClient gameID={id} />;
+    return <GameClient matchID={id} />;
   }
 
   return (
     <>
       <BotManager roomID={id} />
       <GameClient
-        gameID={id}
+        matchID={id}
         playerID={String(activeRoomPlayer.playerID)}
         credentials={activeRoomPlayer.credential}
         debug={!isProduction}
