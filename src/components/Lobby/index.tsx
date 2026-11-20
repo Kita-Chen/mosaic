@@ -13,6 +13,7 @@ import { Button } from "components/Button";
 import Tippy from "@tippyjs/react";
 import "tippy.js/dist/tippy.css"; // optional
 import { ButtonLang } from "components/ButtonLang";
+import { BotManager } from "./BotManager";
 
 const GameClient = Client({
   game: MosaicGame,
@@ -38,8 +39,10 @@ export const GameLobbySetup: React.FC<{ startGame(): void }> = ({
   const roomMetadata = useStoreState((s) => s.roomMetadata);
   const loadRoomMetadata = useStoreActions((s) => s.loadRoomMetadata);
   const joinRoom = useStoreActions((s) => s.joinRoom);
+  const addBot = useStoreActions((s) => s.addBot);
   const activeRoomPlayer = useStoreState((s) => s.activeRoomPlayer);
   const [tooltipVisible, setTooltipVisible] = useState(false);
+  const [addingBotSeat, setAddingBotSeat] = useState<number | null>(null);
 
   const supportsCopying = !!document.queryCommandSupported("copy");
   function copyToClipboard(value: string) {
@@ -67,6 +70,20 @@ export const GameLobbySetup: React.FC<{ startGame(): void }> = ({
   const handleJoinRoom = () => {
     if (canJoin) {
       joinRoom({ playerID: emptySeatID, playerName: nickname, roomID: id });
+    }
+  };
+
+  const handleAddBot = async (seatID: number) => {
+    if (!id || addingBotSeat !== null) return;
+    setAddingBotSeat(seatID);
+    try {
+      await addBot({
+        playerID: seatID,
+        playerName: `🤖 電腦 ${seatID + 1}`,
+        roomID: id,
+      });
+    } finally {
+      setAddingBotSeat(null);
     }
   };
 
@@ -153,6 +170,15 @@ export const GameLobbySetup: React.FC<{ startGame(): void }> = ({
                     <Trans>Join</Trans>
                   </Button>
                 )}
+                {alreadyJoined && !gameRoomFull && (
+                  <Button
+                    size="small"
+                    disabled={addingBotSeat !== null}
+                    onClick={() => handleAddBot(player.id)}
+                  >
+                    <Trans>Add Bot</Trans>
+                  </Button>
+                )}
               </div>
             );
           })
@@ -168,7 +194,7 @@ export const GameLobbySetup: React.FC<{ startGame(): void }> = ({
             <div className="text-white text-[1.25em] font-medium">
               <Trans>Please set a nickname first</Trans>
             </div>
-          ) : !emptySeatID ? (
+          ) : emptySeatID === undefined ? (
             <div className="text-white text-[1.25em] font-medium">
               <Trans>Room is full</Trans>
             </div>
@@ -199,12 +225,15 @@ export const GameLobbyPlay = () => {
   const activeRoomPlayer = useStoreState((s) => s.activeRoomPlayer);
 
   return (
-    <GameClient
-      gameID={id}
-      playerID={String(activeRoomPlayer?.playerID)}
-      credentials={activeRoomPlayer?.credential}
-      debug={!isProduction}
-    />
+    <>
+      <BotManager roomID={id} />
+      <GameClient
+        gameID={id}
+        playerID={String(activeRoomPlayer?.playerID)}
+        credentials={activeRoomPlayer?.credential}
+        debug={!isProduction}
+      />
+    </>
   );
 };
 
