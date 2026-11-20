@@ -6,7 +6,7 @@ import { GameState, GameTile, GameTileType, Player, ScoreBoard } from "./types";
 
 export * from "./types";
 
-const TILE_TYPE_COUNT = 20; // defined by game rules
+const TILE_TYPE_COUNT = 20;
 const DEFAULT_TILE_ORDER = [
   GameTileType.A,
   GameTileType.B,
@@ -14,7 +14,6 @@ const DEFAULT_TILE_ORDER = [
   GameTileType.D,
   GameTileType.E,
 ];
-// specifies how much minus points user gets for each item
 const INDEX_TO_MINUS_POINTS = [1, 1, 2, 2, 2, 3, 3];
 const PLAYERS_COUNT_TO_GROUPS = {
   2: 5,
@@ -48,7 +47,6 @@ function getTileGroups(
     let tile = updatedTiles[i];
 
     if (!tile && usedTiles.length > 0) {
-      // TODO: replace shuffle with ctx.random.Shuffle to be consistent
       updatedTiles.push(...shuffle(usedTiles));
       clearUsedTiles = true;
       tile = updatedTiles[i];
@@ -69,287 +67,10 @@ function getTileGroups(
   };
 }
 
-const voteEndGameMove = {
-  undoable: false,
-  client: false,
-  move: ({ G, ctx, playerID }: any, humanPlayerIds: PlayerID[] = []) => {
-    const voterId = String(playerID ?? ctx.currentPlayer);
-    if (!G.players[voterId]) return INVALID_MOVE;
-
-    if (!Array.isArray(G.endGameVotes)) {
-      G.endGameVotes = [];
-    }
-
-    const existingIndex = G.endGameVotes.indexOf(voterId);
-    if (existingIndex >= 0) {
-      G.endGameVotes.splice(existingIndex, 1);
-    } else {
-      G.endGameVotes.push(voterId);
-    }
-
-    const validHumans = Array.from(
-      new Set((humanPlayerIds || []).map(String))
-    ).filter((id) => !!G.players[id]);
-
-    if (
-      validHumans.length > 0 &&
-      validHumans.every((id) => G.endGameVotes.includes(id))
-    ) {
-      G.shouldEndGame = true;
-    }
-  },
-};
-
-const pickTilesMove = {
-  undoable: true,
-  client: true,
-  move: ({ G, ctx }: any, tiles: any, tileGroupId: any, targetSlotId: any) => {
-    // 確保每回合只能拿一次磚
-    if (G.hasPickedTiles) return INVALID_MOVE;
-
-    const isMiddleGroup = tileGroupId === "middle";
-    const tileGroup = isMiddleGroup
-      ? G.tileMiddleGroup
-      : G.tileGroups[tileGroupId];
-
-    const [selectedTiles, tilesForMiddle] = partition(
-      tileGroup,
-      ({ type }) => type === tiles[0].type
-    );
-
-    const playerBoard = G.players[ctx.currentPlayer];
-
-    if (targetSlotId === "minus-points") {
-      playerBoard.minusPoints.push(...selectedTiles);
-    } else {
-      const targetSlot = playerBoard.leftSlots[targetSlotId];
-
-      let emptySlotCount = targetSlot.filter((s) => s === null).length;
-
-      // cannot place tiles of different color
-      if (targetSlot[0] && targetSlot[0].type !== selectedTiles[0].type) {
-        return INVALID_MOVE;
-      }
-
-      // cannot place if color is already filled
-      const correspondingRightSlot = playerBoard.rightSlots[targetSlotId].find(
-        (slot) => slot.type === selectedTiles[0].type
-      );
-      if (!!correspondingRightSlot?.tile) {
-        return INVALID_MOVE;
-      }
-
-      selectedTiles.forEach((tile) => {
-        if (emptySlotCount > 0) {
-          targetSlot[targetSlot.indexOf(null)] = tile;
-        } else {
-          // add minus points
-          playerBoard.minusPoints.push(tile);
-        }
-
-        emptySlotCount--;
-      });
-    }
-
-    tileGroup.length = 0;
-    G.tileMiddleGroup = tilesForMiddle.concat(G.tileMiddleGroup);
-
-    // first person that takes from middle gets begin tile
-    if (isMiddleGroup && !G.beginTileOwner) {
-      playerBoard.minusPoints.push("begin-tile");
-      G.beginTileOwner = ctx.currentPlayer;
-    }
-
-    G.hasPickedTiles = true;
-  },
-};
-
-const endTurnMove = {
-  undoable: false,
-  client: false,
-  move: ({ G, ctx, events }: any) => {
-    if (!G.hasPickedTiles) return INVALID_MOVE;
-
-    let overrideNextUser: PlayerID | null = null;
-
-    if (shouldReinitialize(G)) {
-      let shouldEndGame = false;
-      // count points
-      each(G.players, (player) => {
-        let points = 0;
-
-        // move tiles from left to right
-        player.leftSlots.forEach((slotRow, rowIndex) => {
-          if (slotRow.includes(null)) return;
-          // if doesn't include null we can consider it filled
-          const filledRowTiles = slotRow as GameTile[];
-
-          const [firstTile, ...restTiles] = filledRowTiles;
-          const targetSlot = player.rightSlots[rowIndex].find(
-            (slot) => slot.type === firstTile.type
-          );
-
-          if (!targetSlot) {
-            throw new Error("Unexpected behaviour: missing right tile");
-          }
-
-          G.usedTiles.push(...restTiles);
-          targetSlot.tile = firstTile;
-
-          // count row points for moved tile
-          points++; // add one point by default
-
-          let colRightIndex = targetSlot.colIndex + 1;
-          let colLeftIndex = targetSlot.colIndex - 1;
-          const row = player.rightSlots[targetSlot.rowIndex];
-          let hasRowPoints = false;
-
-          // counts right adjacent tile points
-          while (row[colRightIndex]?.tile) {
-            hasRowPoints = true;
-            colRightIndex++;
-            points++;
-          }
-
-          // counts left adjacent tile points
-          while (row[colLeftIndex]?.tile) {
-            hasRowPoints = true;
-            colLeftIndex--;
-            points++;
-          }
-
-          const columnAsList = player.rightSlots.map((row) => {
-            return row.find((slot) => slot.colIndex === targetSlot.colIndex)!;
-          });
-          let rowRightIndex = targetSlot.rowIndex + 1;
-          let rowLeftIndex = targetSlot.rowIndex - 1;
-          let hasColumnPoints = false;
-
-          // counts right adjacent tile points
-          while (columnAsList[rowRightIndex]?.tile) {
-            hasColumnPoints = true;
-            rowRightIndex++;
-            points++;
-          }
-
-          // counts left adjacent tile points
-          while (columnAsList[rowLeftIndex]?.tile) {
-            hasColumnPoints = true;
-            rowLeftIndex--;
-            points++;
-          }
-
-          // count placed tile second time for column
-          if (hasRowPoints && hasColumnPoints) points++;
-
-          // reset rows on the left, for filled tiles
-          slotRow.length = rowIndex + 1;
-          slotRow.fill(null);
-        });
-
-        // count minus points
-        let minusPoints = 0;
-        player.minusPoints.forEach((_, index) => {
-          minusPoints += INDEX_TO_MINUS_POINTS[index] || 0;
-        });
-
-        player.minusPoints = [];
-
-        // check if should end game
-        player.rightSlots.forEach((row) => {
-          let filledSlotsCount = 0;
-
-          row.forEach((slot) => {
-            if (slot.tile) filledSlotsCount++;
-          });
-
-          // set shouldEndGame flag to true if all tiles in a row are filled
-          if (filledSlotsCount === row.length) {
-            shouldEndGame = true;
-          }
-        });
-
-        G.scoreboard[player.id] += points - minusPoints;
-      });
-
-      if (shouldEndGame) {
-        // count bonus points
-        each(G.players, (player) => {
-          const bonusRows: number[] = []; // array of row ids
-          const bonusColors: GameTileType[] = [];
-          const bonusColumns: number[] = []; // array of col ids
-
-          const tileTypeCount: object = {};
-          const tileColumnCount: object = {};
-
-          player.rightSlots.forEach((slotRow) => {
-            let filledSlotRows = 0;
-
-            slotRow.forEach((slot) => {
-              if (slot.tile) {
-                filledSlotRows++;
-                tileTypeCount[slot.tile.type] =
-                  tileTypeCount[slot.tile.type] + 1 || 1;
-
-                if (tileTypeCount[slot.tile.type] === 5) {
-                  bonusColors.push(slot.tile.type);
-                }
-
-                tileColumnCount[slot.colIndex] =
-                  tileColumnCount[slot.colIndex + 1] || 1;
-
-                if (tileColumnCount[slot.colIndex] === 5) {
-                  bonusColumns.push(slot.colIndex);
-                }
-              }
-            });
-
-            if (filledSlotRows === slotRow.length) {
-              bonusRows.push(slotRow[0].rowIndex);
-            }
-          });
-
-          const rowBonusPoints = bonusRows.length * 2; // +2 points per row
-          const columnBonusPoints = bonusColumns.length * 8; // +8 points per color
-          const colorBonusPoints = bonusColors.length * 10; // +10 points per color
-
-          G.scoreboard[player.id] +=
-            rowBonusPoints + columnBonusPoints + colorBonusPoints;
-        });
-
-        G.shouldEndGame = true;
-      }
-
-      // start next pickTiles phase
-      const { updatedTilesInPool, updatedUsedTiles, tileGroups } =
-        getTileGroups(
-          G.tilesInPool,
-          G.usedTiles,
-          PLAYERS_COUNT_TO_GROUPS[ctx.numPlayers]
-        );
-
-      G.usedTiles = updatedUsedTiles;
-      G.tileGroups = tileGroups;
-      G.tilesInPool = updatedTilesInPool;
-      overrideNextUser = G.beginTileOwner;
-      G.beginTileOwner = null;
-    }
-
-    G.hasPickedTiles = false;
-
-    if (overrideNextUser) {
-      events.endTurn({ next: overrideNextUser });
-    } else {
-      events.endTurn();
-    }
-  },
-};
-
 export const MosaicGame: Game<GameState> = {
   name: GAME_ID,
 
   setup: ({ ctx, random }) => {
-    // generate 20 tiles for each tile type
     const tiles: GameTile[] = random.Shuffle(
       DEFAULT_TILE_ORDER.flatMap((tileType, groupIndex) => {
         return times<GameTile>(TILE_TYPE_COUNT, (index: number) => {
@@ -430,28 +151,266 @@ export const MosaicGame: Game<GameState> = {
       return {
         winner,
       };
-    } else {
-      return false;
     }
+    return undefined;
   },
 
-  turn: {
-    activePlayers: {
-      currentPlayer: "play",
-      others: "vote",
-    },
-    stages: {
-      play: {
-        moves: {
-          pickTiles: pickTilesMove,
-          endTurn: endTurnMove,
-          voteEndGame: voteEndGameMove,
-        },
+  moves: {
+    voteEndGame: {
+      undoable: false,
+      client: false,
+      move: ({ G, ctx, playerID }: any, humanPlayerIds: PlayerID[] = []) => {
+        const voterId = String(playerID ?? ctx.currentPlayer);
+        if (!G.players[voterId]) return INVALID_MOVE;
+
+        if (!Array.isArray(G.endGameVotes)) {
+          G.endGameVotes = [];
+        }
+
+        const existingIndex = G.endGameVotes.indexOf(voterId);
+        if (existingIndex >= 0) {
+          G.endGameVotes.splice(existingIndex, 1);
+        } else {
+          G.endGameVotes.push(voterId);
+        }
+
+        const validHumans = Array.from(
+          new Set((humanPlayerIds || []).map(String))
+        ).filter((id) => !!G.players[id]);
+
+        if (
+          validHumans.length > 0 &&
+          validHumans.every((id) => G.endGameVotes.includes(id))
+        ) {
+          G.shouldEndGame = true;
+        }
       },
-      vote: {
-        moves: {
-          voteEndGame: voteEndGameMove,
-        },
+    },
+
+    endTurn: {
+      undoable: false,
+      client: false,
+      move: ({ G, ctx, events }) => {
+        if (!G.hasPickedTiles) return INVALID_MOVE;
+
+        let overrideNextUser: PlayerID | null = null;
+
+        if (shouldReinitialize(G)) {
+          let shouldEndGame = false;
+          each(G.players, (player) => {
+            let points = 0;
+
+            player.leftSlots.forEach((slotRow, rowIndex) => {
+              if (slotRow.includes(null)) return;
+              const filledRowTiles = slotRow as GameTile[];
+
+              const [firstTile, ...restTiles] = filledRowTiles;
+              const targetSlot = player.rightSlots[rowIndex].find(
+                (slot) => slot.type === firstTile.type
+              );
+
+              if (!targetSlot) {
+                throw new Error("Unexpected behaviour: missing right tile");
+              }
+
+              G.usedTiles.push(...restTiles);
+              targetSlot.tile = firstTile;
+
+              points++;
+
+              let colRightIndex = targetSlot.colIndex + 1;
+              let colLeftIndex = targetSlot.colIndex - 1;
+              const row = player.rightSlots[targetSlot.rowIndex];
+              let hasRowPoints = false;
+
+              while (row[colRightIndex]?.tile) {
+                hasRowPoints = true;
+                colRightIndex++;
+                points++;
+              }
+
+              while (row[colLeftIndex]?.tile) {
+                hasRowPoints = true;
+                colLeftIndex--;
+                points++;
+              }
+
+              const columnAsList = player.rightSlots.map((row) => {
+                return row.find(
+                  (slot) => slot.colIndex === targetSlot.colIndex
+                )!;
+              });
+              let rowRightIndex = targetSlot.rowIndex + 1;
+              let rowLeftIndex = targetSlot.rowIndex - 1;
+              let hasColumnPoints = false;
+
+              while (columnAsList[rowRightIndex]?.tile) {
+                hasColumnPoints = true;
+                rowRightIndex++;
+                points++;
+              }
+
+              while (columnAsList[rowLeftIndex]?.tile) {
+                hasColumnPoints = true;
+                rowLeftIndex--;
+                points++;
+              }
+
+              if (hasRowPoints && hasColumnPoints) points++;
+
+              slotRow.length = rowIndex + 1;
+              slotRow.fill(null);
+            });
+
+            let minusPoints = 0;
+            player.minusPoints.forEach((_, index) => {
+              minusPoints += INDEX_TO_MINUS_POINTS[index] || 0;
+            });
+
+            player.minusPoints = [];
+
+            player.rightSlots.forEach((row) => {
+              let filledSlotsCount = 0;
+
+              row.forEach((slot) => {
+                if (slot.tile) filledSlotsCount++;
+              });
+
+              if (filledSlotsCount === row.length) {
+                shouldEndGame = true;
+              }
+            });
+
+            G.scoreboard[player.id] += points - minusPoints;
+          });
+
+          if (shouldEndGame) {
+            each(G.players, (player) => {
+              const bonusRows: number[] = [];
+              const bonusColors: GameTileType[] = [];
+              const bonusColumns: number[] = [];
+
+              const tileTypeCount: object = {};
+              const tileColumnCount: object = {};
+
+              player.rightSlots.forEach((slotRow) => {
+                let filledSlotRows = 0;
+
+                slotRow.forEach((slot) => {
+                  if (slot.tile) {
+                    filledSlotRows++;
+                    tileTypeCount[slot.tile.type] =
+                      tileTypeCount[slot.tile.type] + 1 || 1;
+
+                    if (tileTypeCount[slot.tile.type] === 5) {
+                      bonusColors.push(slot.tile.type);
+                    }
+
+                    tileColumnCount[slot.colIndex] =
+                      tileColumnCount[slot.colIndex + 1] || 1;
+
+                    if (tileColumnCount[slot.colIndex] === 5) {
+                      bonusColumns.push(slot.colIndex);
+                    }
+                  }
+                });
+
+                if (filledSlotRows === slotRow.length) {
+                  bonusRows.push(slotRow[0].rowIndex);
+                }
+              });
+
+              const rowBonusPoints = bonusRows.length * 2;
+              const columnBonusPoints = bonusColumns.length * 8;
+              const colorBonusPoints = bonusColors.length * 10;
+
+              G.scoreboard[player.id] +=
+                rowBonusPoints + columnBonusPoints + colorBonusPoints;
+            });
+
+            G.shouldEndGame = true;
+          }
+
+          const { updatedTilesInPool, updatedUsedTiles, tileGroups } =
+            getTileGroups(
+              G.tilesInPool,
+              G.usedTiles,
+              PLAYERS_COUNT_TO_GROUPS[ctx.numPlayers]
+            );
+
+          G.usedTiles = updatedUsedTiles;
+          G.tileGroups = tileGroups;
+          G.tilesInPool = updatedTilesInPool;
+          overrideNextUser = G.beginTileOwner;
+          G.beginTileOwner = null;
+        }
+
+        G.hasPickedTiles = false;
+
+        if (overrideNextUser) {
+          events.endTurn({ next: overrideNextUser });
+        } else {
+          events.endTurn();
+        }
+      },
+    },
+
+    pickTiles: {
+      undoable: true,
+      client: true,
+      move: ({ G, ctx }, tiles, tileGroupId, targetSlotId) => {
+        if (G.hasPickedTiles) return INVALID_MOVE;
+
+        const isMiddleGroup = tileGroupId === "middle";
+        const tileGroup = isMiddleGroup
+          ? G.tileMiddleGroup
+          : G.tileGroups[tileGroupId];
+
+        const [selectedTiles, tilesForMiddle] = partition(
+          tileGroup,
+          ({ type }) => type === tiles[0].type
+        );
+
+        const playerBoard = G.players[ctx.currentPlayer];
+
+        if (targetSlotId === "minus-points") {
+          playerBoard.minusPoints.push(...selectedTiles);
+        } else {
+          const targetSlot = playerBoard.leftSlots[targetSlotId];
+
+          let emptySlotCount = targetSlot.filter((s) => s === null).length;
+
+          if (targetSlot[0] && targetSlot[0].type !== selectedTiles[0].type) {
+            return INVALID_MOVE;
+          }
+
+          const correspondingRightSlot = playerBoard.rightSlots[
+            targetSlotId
+          ].find((slot) => slot.type === selectedTiles[0].type);
+          if (!!correspondingRightSlot?.tile) {
+            return INVALID_MOVE;
+          }
+
+          selectedTiles.forEach((tile) => {
+            if (emptySlotCount > 0) {
+              targetSlot[targetSlot.indexOf(null)] = tile;
+            } else {
+              playerBoard.minusPoints.push(tile);
+            }
+
+            emptySlotCount--;
+          });
+        }
+
+        tileGroup.length = 0;
+        G.tileMiddleGroup = tilesForMiddle.concat(G.tileMiddleGroup);
+
+        if (isMiddleGroup && !G.beginTileOwner) {
+          playerBoard.minusPoints.push("begin-tile");
+          G.beginTileOwner = ctx.currentPlayer;
+        }
+
+        G.hasPickedTiles = true;
       },
     },
   },
