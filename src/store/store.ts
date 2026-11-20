@@ -11,7 +11,7 @@ export interface StoreModel {
   nickname: string | null;
   setNickname: Action<StoreModel, string>;
   roomID: string | null;
-  setRoomID: Action<StoreModel, string>;
+  setRoomID: Action<StoreModel, string | null>;
   createGameRoom: Thunk<
     StoreModel,
     { numPlayers: number; roomName?: string },
@@ -134,6 +134,7 @@ export const store: StoreModel = {
   }),
 
   clearGameState: action((state) => {
+    state.roomID = null;
     state.roomMetadata = null;
     state.activeRoomPlayer = null;
     state.showRulebook = false;
