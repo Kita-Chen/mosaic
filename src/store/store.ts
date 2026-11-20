@@ -26,6 +26,7 @@ export interface StoreModel {
   activeRoomPlayer: ActiveRoomPlayer | null;
   setActiveRoomPlayer: Action<StoreModel, ActiveRoomPlayer>;
   joinRoom: Thunk<StoreModel, JoinRoomParams, StoreInjections>;
+  addBot: Thunk<StoreModel, JoinRoomParams, StoreInjections>;
   startGame: Thunk<StoreModel, string, StoreInjections>;
   clearGameState: Action<StoreModel>;
   showRulebook: boolean;
@@ -38,6 +39,26 @@ export const NICKNAME_STORAGE_KEY = "mosaic_nickname";
 
 // 'player' refers to users player in the game room
 export const PLAYER_STORAGE_KEY = "mosaic_player";
+
+// 依房間 ID 獨立儲存該房的 Bot 憑證，重整網頁也不會失效
+export const getBotsStorageKey = (roomID: string) => `mosaic_bots_${roomID}`;
+
+export const getRoomBots = (roomID: string): ActiveRoomPlayer[] => {
+  try {
+    const raw = localStorage.getItem(getBotsStorageKey(roomID));
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+};
+
+export const saveRoomBot = (roomID: string, bot: ActiveRoomPlayer) => {
+  const existing = getRoomBots(roomID).filter(
+    (b) => b.playerID !== bot.playerID
+  );
+  existing.push(bot);
+  localStorage.setItem(getBotsStorageKey(roomID), JSON.stringify(existing));
+};
 
 export let initState: any = {};
 export const setInitState = (state?: StoreModel) => {
@@ -56,7 +77,6 @@ export const store: StoreModel = {
     state.roomID = payload;
   }),
   createGameRoom: thunk(async (actions, payload, { injections }) => {
-    // Clear previous game state before creating new room
     actions.clearGameState();
 
     gtag("event", "create-game-room", { playerCount: payload.numPlayers });
@@ -91,7 +111,6 @@ export const store: StoreModel = {
     state.activeRoomPlayer = payload;
   }),
   joinRoom: thunk(async (actions, payload, { injections }) => {
-    // Clear previous game state before joining new room
     actions.clearGameState();
 
     const { playerCredentials } = await injections.lobbyApi.joinRoom(payload);
@@ -101,16 +120,23 @@ export const store: StoreModel = {
     });
   }),
 
+  addBot: thunk(async (actions, payload, { injections }) => {
+    const { playerCredentials } = await injections.lobbyApi.joinRoom(payload);
+    saveRoomBot(payload.roomID, {
+      credential: playerCredentials,
+      playerID: payload.playerID,
+    });
+    await actions.loadRoomMetadata(payload.roomID);
+  }),
+
   startGame: thunk(async (actions, roomID, { injections }) => {
     await injections.lobbyApi.startGame(roomID);
   }),
 
   clearGameState: action((state) => {
-    // Clear game-related state when joining a new room
     state.roomMetadata = null;
     state.activeRoomPlayer = null;
     state.showRulebook = false;
-    // Clear from localStorage as well
     localStorage.removeItem(PLAYER_STORAGE_KEY);
   }),
 
