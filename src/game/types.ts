@@ -14,11 +14,6 @@ export interface GameTile {
   id: string;
 }
 
-export interface GameTile {
-  type: GameTileType; // e.g. in UI shows different color
-  id: string;
-}
-
 export interface PermanentSlot {
   type: GameTileType;
   tile?: GameTile;
@@ -47,4 +42,6 @@ export interface GameState {
   beginTileOwner: null | PlayerID; // null means tile is in the middle group
   players: { [key: string]: Player };
   shouldEndGame: boolean;
+  hasPickedTiles: boolean;
+  endGameVotes: PlayerID[];
 }
