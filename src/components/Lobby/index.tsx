@@ -22,7 +22,15 @@ const GameClient = Client({
 });
 
 export const GameLobby = () => {
+  const { id } = useParams();
   const [isGameRunning, setGameRunning] = useState(false);
+  const setRoomID = useStoreActions((s) => s.setRoomID);
+
+  useEffect(() => {
+    // 進入房間後立即清空 roomID，避免點「建立新遊戲」時被彈回舊房
+    setRoomID(null);
+    setGameRunning(false);
+  }, [id, setRoomID]);
 
   return isGameRunning ? (
     <GameLobbyPlay />
